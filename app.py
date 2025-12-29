@@ -100,7 +100,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- MAIN ----------------
 def main():
-    token = os.getenv("BOT_TOKEN")
+    token = os.getenv("AAFZ4hihP5r3SrbD-qJRbUV95Yv_68yQBvs")
     if not token:
         raise RuntimeError("BOT_TOKEN environment variable is missing")
 
