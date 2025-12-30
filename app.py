@@ -108,29 +108,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = Application.builder().token(TOKEN).build()
 
-    conv_handler = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_vote_callback, pattern="^start_vote$")],
-        states={
-            CHOOSING_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_text)],
-            CHOOSING_BUTTON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_button)],
-        },
-        fallbacks=[],
+    # handlers here ...
+
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", 8080)),
+        url_path="webhook",
+        webhook_url=os.getenv("RAILWAY_PUBLIC_DOMAIN"),
     )
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(conv_handler)
-    application.add_handler(CallbackQueryHandler(button_handler, pattern="^vote$"))
-
-    # 🔥 WEBHOOK MODE (Render)
-PORT = int(os.getenv("PORT", 8080))
-
-application.run_webhook(
-    listen="0.0.0.0",
-    port=PORT,
-    url_path="webhook",
-    webhook_url=os.getenv("RAILWAY_PUBLIC_DOMAIN"),
-)
-
 
 if __name__ == "__main__":
     main()
+
