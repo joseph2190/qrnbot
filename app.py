@@ -1,129 +1,131 @@
 import os
-import logging
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
-    ConversationHandler,
-    ContextTypes,
     filters,
+    ContextTypes,
+    ConversationHandler,
+    CallbackQueryHandler,
 )
 
-# ---------------- LOGGING ----------------
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
+# =====================
+# ENV TOKEN (Render)
+# =====================
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable is missing")
 
-# ---------------- STATES ----------------
+# =====================
+# Conversation states
+# =====================
 CHOOSING_TEXT, CHOOSING_BUTTON = range(2)
 
-# ---------------- COMMANDS ----------------
+# =====================
+# /start command
+# =====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message is None:
+        return
+
+    keyboard = [[InlineKeyboardButton("إبدأ ✨", callback_data="start_vote")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "👋 Welcome!\n\n"
-        "Use /startvote to create a new vote."
+        "مرحبًا! 🌟\n"
+        "هذا الروبوت مصمم لمساعدتك في إضافة أسماء الأفراد إلى قائمة مخصصة لقراءة القرآن الكريم 📖.\n"
+        "يمكنك إنشاء قائمة لتوزيع الأجزاء 📜 أو تذكير المستخدمين بالمواعيد ⏰.",
+        reply_markup=reply_markup,
     )
 
-async def startvote(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text(
-        "✍️ Send the vote question (example: *Should we order pizza?*)",
-        parse_mode="Markdown",
-    )
+# =====================
+# Start vote (button)
+# =====================
+async def start_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+
+    await query.message.reply_text("أدخل الجزء أو الملاحظة (مثال: سورة البقرة).")
     return CHOOSING_TEXT
 
-async def receive_vote_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+# =====================
+# Get vote text
+# =====================
+async def get_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.message is None:
+        return ConversationHandler.END
+
     context.user_data["vote_text"] = update.message.text
-    await update.message.reply_text(
-        "🔘 Now send the button label (example: *Vote*)",
-        parse_mode="Markdown",
-    )
+    await update.message.reply_text("أدخل اسم الزر (مثال: أضف إلى القائمة).")
     return CHOOSING_BUTTON
 
-async def receive_button_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    vote_text = context.user_data.get("vote_text", "Vote")
+# =====================
+# Get button text
+# =====================
+async def get_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.message is None:
+        return ConversationHandler.END
+
+    vote_text = context.user_data.get("vote_text")
     button_text = update.message.text
+
+    context.user_data["button_text"] = button_text
 
     keyboard = [[InlineKeyboardButton(button_text, callback_data="vote")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    sent = await update.message.reply_text(vote_text, reply_markup=reply_markup)
-
-    key = f"{sent.chat_id}:{sent.message_id}"
-
-    context.application.bot_data.setdefault("votes", {})[key] = {
-        "text": vote_text,
-        "voters": set(),
-    }
-
+    await update.message.reply_text(vote_text, reply_markup=reply_markup)
     return ConversationHandler.END
 
-async def handle_vote(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =====================
+# Vote button handler
+# =====================
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user = query.from_user
-    user_id = user.id
-    name = user.first_name or user.username or "Anonymous"
-
-    key = f"{query.message.chat_id}:{query.message.message_id}"
-    votes = context.application.bot_data.setdefault("votes", {}).setdefault(
-        key, {"text": query.message.text, "voters": set()}
-    )
-
-    if user_id in votes["voters"]:
+    if query.data != "vote":
         return
 
-    votes["voters"].add(user_id)
+    user = query.from_user
+    user_name = user.first_name or user.username or "مستخدم"
 
-    voters_text = ", ".join(str(uid) for uid in votes["voters"])
-    updated_text = f"{votes['text']}\n\n🗳 Votes: {len(votes['voters'])}"
+    vote_text = context.user_data.get("vote_text", "")
+    button_text = context.user_data.get("button_text", "تصويت")
+
+    keyboard = [[InlineKeyboardButton(button_text, callback_data="vote")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        text=updated_text,
-        reply_markup=query.message.reply_markup,
+        text=f"{vote_text}\n\n{user_name}",
+        reply_markup=reply_markup,
     )
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("❌ Vote creation cancelled.")
-    return ConversationHandler.END
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error("Update error", exc_info=context.error)
-
-# ---------------- MAIN ----------------
+# =====================
+# MAIN (Webhook)
+# =====================
 def main():
-    token = os.getenv("BOT_TOKEN")
-    if not token:
-        raise RuntimeError("BOT_TOKEN environment variable is missing")
+    application = Application.builder().token(TOKEN).build()
 
-    app = Application.builder().token(token).build()
-
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("startvote", startvote)],
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_vote_callback, pattern="^start_vote$")],
         states={
-            CHOOSING_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_vote_text)],
-            CHOOSING_BUTTON: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_button_text)],
+            CHOOSING_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_text)],
+            CHOOSING_BUTTON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_button)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[],
     )
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(conv)
-    app.add_handler(CallbackQueryHandler(handle_vote))
-    app.add_error_handler(error_handler)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(conv_handler)
+    application.add_handler(CallbackQueryHandler(button_handler, pattern="^vote$"))
 
-    # 🔥 WEBHOOK MODE (Render-compatible)
-    app.run_webhook(
+    # 🔥 WEBHOOK MODE (Render)
+    application.run_webhook(
         listen="0.0.0.0",
         port=10000,
+        url_path="webhook",
         webhook_url="https://qrnbot-1.onrender.com",
     )
 
