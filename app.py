@@ -49,7 +49,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-
     await query.message.reply_text("أدخل الجزء أو الملاحظة (مثال: سورة البقرة).")
     return CHOOSING_TEXT
 
@@ -130,7 +129,16 @@ async def error_handler(update, context):
 # MAIN
 # =====================
 def main():
-    app = Application.builder().token(TOKEN).build()
+    # 🔥 IMPORTANT: increased timeouts to avoid Railway cold-start crashes
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .connect_timeout(20)
+        .read_timeout(20)
+        .write_timeout(20)
+        .pool_timeout(20)
+        .build()
+    )
 
     conv = ConversationHandler(
         entry_points=[
