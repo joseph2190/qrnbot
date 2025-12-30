@@ -38,8 +38,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("إبدأ ✨", callback_data="start_vote")]]
     await update.message.reply_text(
         "مرحبًا! 🌟\n"
-        "هذا الروبوت يساعدك في إنشاء قائمة لقراءة القرآن الكريم 📖\n"
-        "اضغط على الزر للبدء.",
+        "هذا الروبوت يساعدك في إنشاء قائمة لقراءة القرآن الكريم 📖.\n"
+        "اضغط على زر (إبدأ) للبدء.",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
@@ -49,6 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def start_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+
     await query.message.reply_text("أدخل الجزء أو الملاحظة (مثال: سورة البقرة).")
     return CHOOSING_TEXT
 
@@ -56,6 +57,9 @@ async def start_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 # GET TEXT
 # =====================
 async def get_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if not update.message:
+        return ConversationHandler.END
+
     context.user_data["vote_text"] = update.message.text
     await update.message.reply_text("أدخل اسم الزر (مثال: أضف إلى القائمة).")
     return CHOOSING_BUTTON
@@ -64,18 +68,21 @@ async def get_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # GET BUTTON
 # =====================
 async def get_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    vote_text = context.user_data["vote_text"]
-    button_text = update.message.text
+    if not update.message:
+        return ConversationHandler.END
 
-    context.user_data["button_text"] = button_text
+    context.user_data["button_text"] = update.message.text
     context.user_data["voters"] = set()
 
-    keyboard = [[InlineKeyboardButton(button_text, callback_data="vote")]]
-    await update.message.reply_text(vote_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard = [[InlineKeyboardButton(update.message.text, callback_data="vote")]]
+    await update.message.reply_text(
+        context.user_data["vote_text"],
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
     return ConversationHandler.END
 
 # =====================
-# VOTE HANDLER (FIXED)
+# BUTTON CLICK (SAFE)
 # =====================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -96,14 +103,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     vote_text = context.user_data.get("vote_text", "")
     button_text = context.user_data.get("button_text", "تصويت")
 
-    names = [user_name for _ in voters]
-    updated_text = f"{vote_text}\n\n" + "\n".join(names)
+    names = "\n".join(
+        [user_name if uid == user_id else "✔️" for uid in voters]
+    )
 
     keyboard = [[InlineKeyboardButton(button_text, callback_data="vote")]]
 
     try:
         await query.edit_message_text(
-            text=updated_text,
+            text=f"{vote_text}\n\n{names}",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
     except BadRequest as e:
@@ -125,13 +133,18 @@ def main():
     app = Application.builder().token(TOKEN).build()
 
     conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_vote_callback, pattern="^start_vote$")],
+        entry_points=[
+            CallbackQueryHandler(start_vote_callback, pattern="^start_vote$")
+        ],
         states={
-            CHOOSING_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_text)],
-            CHOOSING_BUTTON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_button)],
+            CHOOSING_TEXT: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_text)
+            ],
+            CHOOSING_BUTTON: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_button)
+            ],
         },
         fallbacks=[],
-        per_message=True,
     )
 
     app.add_handler(CommandHandler("start", start))
