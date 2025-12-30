@@ -4,18 +4,24 @@ from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    filters,
-    ContextTypes,
-    ConversationHandler,
     CallbackQueryHandler,
+    ConversationHandler,
+    ContextTypes,
+    filters,
 )
 
 # =====================
-# ENV TOKEN (Render)
+# ENV TOKEN
 # =====================
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable is missing")
+
+PORT = int(os.getenv("PORT", 8080))
+PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+
+if not PUBLIC_URL:
+    raise RuntimeError("RAILWAY_PUBLIC_DOMAIN is missing")
 
 # =====================
 # Conversation states
@@ -26,7 +32,7 @@ CHOOSING_TEXT, CHOOSING_BUTTON = range(2)
 # /start command
 # =====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message is None:
+    if not update.message:
         return
 
     keyboard = [[InlineKeyboardButton("إبدأ ✨", callback_data="start_vote")]]
@@ -53,7 +59,7 @@ async def start_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 # Get vote text
 # =====================
 async def get_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.message is None:
+    if not update.message:
         return ConversationHandler.END
 
     context.user_data["vote_text"] = update.message.text
@@ -64,7 +70,7 @@ async def get_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # Get button text
 # =====================
 async def get_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.message is None:
+    if not update.message:
         return ConversationHandler.END
 
     vote_text = context.user_data.get("vote_text")
@@ -108,15 +114,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     application = Application.builder().token(TOKEN).build()
 
-    # handlers here ...
+    # Conversation handler
+    conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(start_vote_callback, pattern="^start_vote$")],
+        states={
+            CHOOSING_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_text)],
+            CHOOSING_BUTTON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_button)],
+        },
+        fallbacks=[],
+    )
 
+    # Register handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(conv_handler)
+    application.add_handler(CallbackQueryHandler(button_handler, pattern="^vote$"))
+
+    # Start webhook
     application.run_webhook(
         listen="0.0.0.0",
-        port=int(os.getenv("PORT", 8080)),
+        port=PORT,
         url_path="webhook",
-        webhook_url=os.getenv("RAILWAY_PUBLIC_DOMAIN"),
+        webhook_url=PUBLIC_URL,
     )
 
 if __name__ == "__main__":
     main()
-
