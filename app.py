@@ -9,128 +9,137 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from telegram.error import BadRequest
 
 # =====================
-# ENV TOKEN
+# ENV VARIABLES
 # =====================
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
-    raise RuntimeError("BOT_TOKEN environment variable is missing")
+    raise RuntimeError("BOT_TOKEN is missing")
 
 PORT = int(os.getenv("PORT", 8080))
 PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_DOMAIN")
-
 if not PUBLIC_URL:
     raise RuntimeError("RAILWAY_PUBLIC_DOMAIN is missing")
 
 # =====================
-# Conversation states
+# STATES
 # =====================
 CHOOSING_TEXT, CHOOSING_BUTTON = range(2)
 
 # =====================
-# /start command
+# /start
 # =====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
 
     keyboard = [[InlineKeyboardButton("إبدأ ✨", callback_data="start_vote")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
         "مرحبًا! 🌟\n"
-        "هذا الروبوت مصمم لمساعدتك في إضافة أسماء الأفراد إلى قائمة مخصصة لقراءة القرآن الكريم 📖.\n"
-        "يمكنك إنشاء قائمة لتوزيع الأجزاء 📜 أو تذكير المستخدمين بالمواعيد ⏰.",
-        reply_markup=reply_markup,
+        "هذا الروبوت يساعدك في إنشاء قائمة لقراءة القرآن الكريم 📖\n"
+        "اضغط على الزر للبدء.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
 
 # =====================
-# Start vote (button)
+# START BUTTON
 # =====================
 async def start_vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-
     await query.message.reply_text("أدخل الجزء أو الملاحظة (مثال: سورة البقرة).")
     return CHOOSING_TEXT
 
 # =====================
-# Get vote text
+# GET TEXT
 # =====================
 async def get_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.message:
-        return ConversationHandler.END
-
     context.user_data["vote_text"] = update.message.text
     await update.message.reply_text("أدخل اسم الزر (مثال: أضف إلى القائمة).")
     return CHOOSING_BUTTON
 
 # =====================
-# Get button text
+# GET BUTTON
 # =====================
 async def get_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if not update.message:
-        return ConversationHandler.END
-
-    vote_text = context.user_data.get("vote_text")
+    vote_text = context.user_data["vote_text"]
     button_text = update.message.text
 
     context.user_data["button_text"] = button_text
+    context.user_data["voters"] = set()
 
     keyboard = [[InlineKeyboardButton(button_text, callback_data="vote")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(vote_text, reply_markup=reply_markup)
+    await update.message.reply_text(vote_text, reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
 
 # =====================
-# Vote button handler
+# VOTE HANDLER (FIXED)
 # =====================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data != "vote":
+    user = query.from_user
+    user_id = user.id
+    user_name = user.first_name or user.username or "مستخدم"
+
+    voters = context.user_data.setdefault("voters", set())
+
+    if user_id in voters:
+        await query.answer("تم تسجيلك بالفعل ✅", show_alert=False)
         return
 
-    user = query.from_user
-    user_name = user.first_name or user.username or "مستخدم"
+    voters.add(user_id)
 
     vote_text = context.user_data.get("vote_text", "")
     button_text = context.user_data.get("button_text", "تصويت")
 
-    keyboard = [[InlineKeyboardButton(button_text, callback_data="vote")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    names = [user_name for _ in voters]
+    updated_text = f"{vote_text}\n\n" + "\n".join(names)
 
-    await query.edit_message_text(
-        text=f"{vote_text}\n\n{user_name}",
-        reply_markup=reply_markup,
-    )
+    keyboard = [[InlineKeyboardButton(button_text, callback_data="vote")]]
+
+    try:
+        await query.edit_message_text(
+            text=updated_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+    except BadRequest as e:
+        if "Message is not modified" in str(e):
+            pass
+        else:
+            raise
 
 # =====================
-# MAIN (Webhook)
+# ERROR HANDLER
+# =====================
+async def error_handler(update, context):
+    print("ERROR:", context.error)
+
+# =====================
+# MAIN
 # =====================
 def main():
-    application = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(TOKEN).build()
 
-    # Conversation handler
-    conv_handler = ConversationHandler(
+    conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(start_vote_callback, pattern="^start_vote$")],
         states={
             CHOOSING_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_text)],
             CHOOSING_BUTTON: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_button)],
         },
         fallbacks=[],
+        per_message=True,
     )
 
-    # Register handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(conv_handler)
-    application.add_handler(CallbackQueryHandler(button_handler, pattern="^vote$"))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(conv)
+    app.add_handler(CallbackQueryHandler(button_handler, pattern="^vote$"))
+    app.add_error_handler(error_handler)
 
-    # Start webhook
-    application.run_webhook(
+    app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         url_path="webhook",
