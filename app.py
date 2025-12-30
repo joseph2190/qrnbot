@@ -122,12 +122,15 @@ def main():
     application.add_handler(CallbackQueryHandler(button_handler, pattern="^vote$"))
 
     # 🔥 WEBHOOK MODE (Render)
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=10000,
-        url_path="webhook",
-        webhook_url="https://qrnbot-1.onrender.com",
-    )
+PORT = int(os.getenv("PORT", 8080))
+
+application.run_webhook(
+    listen="0.0.0.0",
+    port=PORT,
+    url_path="webhook",
+    webhook_url=os.getenv("RAILWAY_PUBLIC_DOMAIN"),
+)
+
 
 if __name__ == "__main__":
     main()
